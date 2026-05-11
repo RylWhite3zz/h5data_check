@@ -1,0 +1,15 @@
+lerobot-train \
+  --dataset.repo_id=local/lerobot_openpi/Dinzhen123/my_openpi_dataset \
+  --dataset.root=/home/enovo/data_check/h5_opt/lerobot_openpi/Dinzhen123/my_openpi_dataset \
+  --policy.type=pi0 \
+  --policy.push_to_hub=false \
+  --output_dir=./outputs/pi0_local_smoke \
+  --job_name=pi0_local_smoke \
+  --policy.device=cuda \
+  --policy.dtype=bfloat16 \
+  --policy.gradient_checkpointing=true \
+  --policy.compile_model=false \
+  --policy.train_expert_only=true \
+  --wandb.enable=false \
+  --steps=10 \
+  --batch_size=1

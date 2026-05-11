@@ -1,0 +1,26 @@
+# 排除 Python 缓存
+__pycache__/
+*.pyc
+
+# 排除大型权重文件 (关键！不要传到 Git)
+*.pth
+*.onnx
+*.weights
+*.h5
+checkpoints/
+
+# 排除数据集
+data/
+datasets/
+*.parquet
+*.mp4
+cobot_magic/
+passover*
+lerobot*
+
+# 排除日志和开发环境
+logs/
+.venv/
+.vscode/
+.codex
+.hf*

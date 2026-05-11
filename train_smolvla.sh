@@ -1,0 +1,11 @@
+lerobot-train \
+  --policy.path=lerobot/smolvla_base \
+  --dataset.repo_id=local/lerobot_smolvla_dataset \
+  --dataset.root=/home/enovo/data_check/h5_opt/lerobot_smolvla_dataset \
+  --batch_size=1 \
+  --steps=10 \
+  --output_dir=outputs/train/smolvla_my_data \
+  --job_name=smolvla_my_data \
+  --policy.device=cuda \
+  --wandb.enable=false \
+  --policy.push_to_hub=false
