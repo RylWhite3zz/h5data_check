@@ -30,7 +30,7 @@ TASK_RANGES = (
     (
         50,
         59,
-        "Pick up the banana with the left hand, hand it to the right, and place it in the purple cup.",
+        "Pick up the banana with the left hand, hand it to the right, and place it in the green cup.",
     ),
 )
 
