@@ -1,6 +1,7 @@
 import argparse
 import io
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -10,6 +11,28 @@ from PIL import Image
 
 
 CAMERAS = ("left", "right", "front")
+TASK_RANGES = (
+    (
+        0,
+        19,
+        "Pick up the banana with the left hand, hand it to the right, and place it in the purple cup.",
+    ),
+    (
+        20,
+        39,
+        "Pick up the banana with the left hand, hand it to the right, and place it in the brown cup.",
+    ),
+    (
+        40,
+        49,
+        "Pick up the banana with the left hand, hand it to the right, and place it in the blue cup.",
+    ),
+    (
+        50,
+        59,
+        "Pick up the banana with the left hand, hand it to the right, and place it in the purple cup.",
+    ),
+)
 
 
 def import_lerobot_dataset():
@@ -106,6 +129,28 @@ def iter_h5_files(input_path, pattern):
     return [path for path in files if path.suffix.lower() in {".h5", ".hdf5"}]
 
 
+def episode_id_from_h5(h5_path):
+    matches = re.findall(r"\d+", h5_path.stem)
+    if not matches:
+        raise ValueError(f"Cannot infer episode id from file name: {h5_path.name}")
+    return int(matches[-1])
+
+
+def task_for_h5(h5_path, default_task=None):
+    episode_id = episode_id_from_h5(h5_path)
+    for start, end, task in TASK_RANGES:
+        if start <= episode_id <= end:
+            return task
+
+    if default_task is not None:
+        return default_task
+
+    raise ValueError(
+        f"No task configured for episode id {episode_id} from {h5_path.name}. "
+        "Add it to TASK_RANGES or pass --task as a fallback."
+    )
+
+
 def convert_episode(dataset, h5_path, task, cameras, action_mode, max_frames=None):
     with h5py.File(h5_path, "r") as root:
         offsets = image_offsets(root, cameras)
@@ -150,7 +195,7 @@ def parse_args():
     )
     parser.add_argument(
         "--pattern",
-        default="align_v*_*.h5",
+        default="align_v0_*.h5",
         help="Glob pattern used when --input is a directory.",
     )
     parser.add_argument(
@@ -164,7 +209,11 @@ def parse_args():
         required=True,
         help="Dataset repo id, for example your_hf_name/my_smolvla_dataset.",
     )
-    parser.add_argument("--task", required=True, help="Natural language task instruction.")
+    parser.add_argument(
+        "--task",
+        default=None,
+        help="Fallback natural language task instruction for files outside TASK_RANGES.",
+    )
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--robot-type", default="custom_bimanual")
     parser.add_argument(
@@ -213,16 +262,17 @@ def main():
 
     total_frames = 0
     for episode_index, h5_path in enumerate(h5_files):
+        task = task_for_h5(h5_path, args.task)
         length = convert_episode(
             dataset,
             h5_path,
-            task=args.task,
+            task=task,
             cameras=CAMERAS,
             action_mode=args.action_mode,
             max_frames=args.max_frames,
         )
         total_frames += length
-        print(f"saved episode {episode_index}: {h5_path.name}, frames={length}")
+        print(f"saved episode {episode_index}: {h5_path.name}, frames={length}, task={task!r}")
 
     dataset.finalize()
     print(f"converted {len(h5_files)} episodes, total_frames={total_frames}")
