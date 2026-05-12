@@ -58,7 +58,9 @@ def decode_compressed_image(root, camera_name, frame_index, offsets):
     except Exception as exc:
         raise RuntimeError(f"Failed to decode {camera_name} frame {frame_index}") from exc
 
-    return np.ascontiguousarray(np.asarray(image, dtype=np.uint8))
+    # Match visualize.py and h5_to_3camera_mp4.py: this dataset displays
+    # correctly when OpenCV-decoded bytes are interpreted as RGB.
+    return np.ascontiguousarray(np.asarray(image, dtype=np.uint8)[..., ::-1])
 
 
 def image_offsets(root, cameras):
