@@ -3,5 +3,6 @@ python h5_to_lerobot_smolvla.py \
   --pattern "align_v0_*.h5" \
   --output ./lerobot_smolvla_dataset \
   --repo-id Dinzhen123/my_smolvla_dataset \
+  --task-ranges ./task_ranges_smolvla.json \
   --fps 30 \
   --overwrite

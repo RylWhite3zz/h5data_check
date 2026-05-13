@@ -11,6 +11,71 @@ The action/state order matches the converted dataset and `infer.py`:
 [left_joint_0..6, right_joint_0..6]
 ```
 
+## Official pretrained base model
+
+`deploy_smolvla_pretrained.py` is a separate adapter for directly loading the official Hugging Face base checkpoint:
+
+```text
+lerobot/smolvla_base
+```
+
+This is mainly for connectivity tests, latency tests, and checking what the base policy returns. The official base checkpoint is not trained for this custom 14-D bimanual robot. Its public config uses a 6-D state/action interface and image keys `observation.images.camera1`, `observation.images.camera2`, and `observation.images.camera3`.
+
+The adapter therefore:
+
+- reads the same ROS image/joint topics as `deploy_smolvla.py`;
+- maps `left/right/front` images to official `camera1/camera2/camera3`;
+- selects six values from the local 14-D state via `--state-indices`;
+- expands the 6-D model action back into a 14-D command shape via `--action-indices`;
+- dry-runs by default.
+
+Server:
+
+```bash
+python deploy_smolvla_pretrained.py \
+  --role server \
+  --device cuda \
+  --camera-mode 3cam
+```
+
+Robot bridge, dry-run default:
+
+```bash
+python deploy_smolvla_pretrained.py \
+  --role robot \
+  --server-host <GPU_DESKTOP_IP> \
+  --camera-mode 3cam \
+  --task "Pick up the banana with the left hand, hand it to the right, and place it in the purple cup." \
+  --verbose
+```
+
+For 2-camera input, the server automatically sets `empty_cameras=1` unless overridden:
+
+```bash
+python deploy_smolvla_pretrained.py \
+  --role server \
+  --device cuda \
+  --camera-mode 2cam
+```
+
+The default 6-D adapter indices are:
+
+```text
+--state-indices 7,8,9,10,11,13
+--action-indices 7,8,9,10,11,13
+```
+
+These select the right arm except local `joint5`. Override them if you want to inspect a different 6-D slice, for example:
+
+```bash
+python deploy_smolvla_pretrained.py \
+  --role server \
+  --state-indices 0,1,2,3,4,6 \
+  --action-indices 0,1,2,3,4,6
+```
+
+Only pass `--allow-publish` after dry-run inspection. Even then, keep the existing step limiter enabled unless you have a separate safety layer.
+
 ## 1. Start the server on the GPU desktop
 
 Use either the training output directory or the `pretrained_model` directory. The script auto-resolves `checkpoints/last/pretrained_model` when present.

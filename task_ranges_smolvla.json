@@ -1,0 +1,24 @@
+{
+  "task_ranges": [
+    {
+      "start": 0,
+      "end": 9,
+      "task": "Pick up the banana with the left hand, hand it to the right, and place it in the blue cup."
+    },
+    {
+      "start": 10,
+      "end": 19,
+      "task": "Pick up the banana with the left hand, hand it to the right, and place it in the brown cup."
+    },
+    {
+      "start": 20,
+      "end": 29,
+      "task": "Pick up the banana with the left hand, hand it to the right, and place it in the purple cup."
+    },
+    {
+      "start": 30,
+      "end": 39,
+      "task": "Pick up the banana with the left hand, hand it to the right, and place it in the green cup."
+    }
+  ]
+}

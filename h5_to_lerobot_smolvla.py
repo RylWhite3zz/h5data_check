@@ -1,5 +1,6 @@
 import argparse
 import io
+import json
 import os
 import re
 import shutil
@@ -11,28 +12,7 @@ from PIL import Image
 
 
 CAMERAS = ("left", "right", "front")
-TASK_RANGES = (
-    (
-        0,
-        19,
-        "Pick up the banana with the left hand, hand it to the right, and place it in the purple cup.",
-    ),
-    (
-        20,
-        39,
-        "Pick up the banana with the left hand, hand it to the right, and place it in the brown cup.",
-    ),
-    (
-        40,
-        49,
-        "Pick up the banana with the left hand, hand it to the right, and place it in the blue cup.",
-    ),
-    (
-        50,
-        59,
-        "Pick up the banana with the left hand, hand it to the right, and place it in the green cup.",
-    ),
-)
+DEFAULT_TASK_RANGES = Path(__file__).with_name("task_ranges_smolvla.json")
 
 
 def import_lerobot_dataset():
@@ -138,9 +118,41 @@ def episode_id_from_h5(h5_path):
     return int(matches[-1])
 
 
-def task_for_h5(h5_path, default_task=None):
+def load_task_ranges(path):
+    with Path(path).open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if isinstance(data, dict):
+        data = data.get("task_ranges")
+    if not isinstance(data, list):
+        raise ValueError("--task-ranges must be a JSON list or an object with task_ranges")
+
+    task_ranges = []
+    for index, item in enumerate(data):
+        if not isinstance(item, dict):
+            raise ValueError(f"--task-ranges item {index} must be a JSON object")
+        try:
+            start = int(item["start"])
+            end = int(item["end"])
+        except KeyError as exc:
+            raise ValueError(f"--task-ranges item {index} is missing {exc.args[0]!r}") from exc
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"--task-ranges item {index} has invalid start/end") from exc
+
+        task = item.get("task")
+        if not isinstance(task, str) or not task.strip():
+            raise ValueError(f"--task-ranges item {index} must have a non-empty task string")
+
+        if start > end:
+            raise ValueError(f"--task-ranges item {index} has start > end: {start} > {end}")
+        task_ranges.append((start, end, task))
+
+    return task_ranges
+
+
+def task_for_h5(h5_path, task_ranges, default_task=None):
     episode_id = episode_id_from_h5(h5_path)
-    for start, end, task in TASK_RANGES:
+    for start, end, task in task_ranges:
         if start <= episode_id <= end:
             return task
 
@@ -149,7 +161,7 @@ def task_for_h5(h5_path, default_task=None):
 
     raise ValueError(
         f"No task configured for episode id {episode_id} from {h5_path.name}. "
-        "Add it to TASK_RANGES or pass --task as a fallback."
+        "Add it to --task-ranges or pass --task as a fallback."
     )
 
 
@@ -214,7 +226,16 @@ def parse_args():
     parser.add_argument(
         "--task",
         default=None,
-        help="Fallback natural language task instruction for files outside TASK_RANGES.",
+        help="Fallback natural language task instruction for files outside --task-ranges.",
+    )
+    parser.add_argument(
+        "--task-ranges",
+        type=Path,
+        default=DEFAULT_TASK_RANGES,
+        help=(
+            "JSON task range config. Accepts either a list or an object with "
+            "task_ranges. Range endpoints are inclusive."
+        ),
     )
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--robot-type", default="custom_bimanual")
@@ -242,6 +263,7 @@ def main():
     h5_files = iter_h5_files(args.input, args.pattern)
     if not h5_files:
         raise FileNotFoundError(f"No H5 files found from {args.input} with {args.pattern}")
+    task_ranges = load_task_ranges(args.task_ranges)
 
     if args.output.exists():
         if not args.overwrite:
@@ -264,7 +286,7 @@ def main():
 
     total_frames = 0
     for episode_index, h5_path in enumerate(h5_files):
-        task = task_for_h5(h5_path, args.task)
+        task = task_for_h5(h5_path, task_ranges, args.task)
         length = convert_episode(
             dataset,
             h5_path,
