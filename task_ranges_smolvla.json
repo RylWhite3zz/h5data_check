@@ -19,6 +19,26 @@
       "start": 30,
       "end": 39,
       "task": "Pick up the banana with the left hand, hand it to the right, and place it in the green cup."
+    },
+    {
+      "start": 40,
+      "end": 49,
+      "task": "Pick up the carrot with the left hand, hand it to the right, and place it in the blue cup."
+    },
+    {
+      "start": 50,
+      "end": 59,
+      "task": "Pick up the carrot with the left hand, hand it to the right, and place it in the brown cup."
+    },
+    {
+      "start": 60,
+      "end": 69,
+      "task": "Pick up the carrot with the left hand, hand it to the right, and place it in the purple cup."
+    },
+    {
+      "start": 70,
+      "end": 82,
+      "task": "Pick up the carrot with the left hand, hand it to the right, and place it in the green cup."
     }
   ]
 }

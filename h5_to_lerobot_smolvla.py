@@ -11,7 +11,8 @@ import numpy as np
 from PIL import Image
 
 
-CAMERAS = ("left", "right", "front")
+DEFAULT_CAMERAS = ("left", "right", "front")
+REQUIRED_CAMERA_DATASETS = ("cnt", "len", "raw")
 DEFAULT_TASK_RANGES = Path(__file__).with_name("task_ranges_smolvla.json")
 
 
@@ -49,6 +50,45 @@ def image_offsets(root, cameras):
         lengths = np.asarray(root[f"obs/image/{camera_name}/len"][:], dtype=np.int64)
         offsets[camera_name] = np.concatenate([[0], np.cumsum(lengths)])
     return offsets
+
+
+def parse_camera_list(value):
+    if isinstance(value, (list, tuple)):
+        cameras = tuple(value)
+    else:
+        cameras = tuple(name.strip() for name in value.split(",") if name.strip())
+
+    if not cameras:
+        raise argparse.ArgumentTypeError("--cameras must contain at least one camera name")
+
+    duplicates = sorted({name for name in cameras if cameras.count(name) > 1})
+    if duplicates:
+        raise argparse.ArgumentTypeError(f"--cameras contains duplicate name(s): {duplicates}")
+
+    return cameras
+
+
+def validate_cameras_for_file(h5_path, cameras):
+    with h5py.File(h5_path, "r") as root:
+        if "obs/image" not in root:
+            raise ValueError(f"{h5_path} is missing obs/image")
+
+        available = sorted(root["obs/image"].keys())
+        missing = [camera_name for camera_name in cameras if camera_name not in root["obs/image"]]
+        if missing:
+            raise ValueError(
+                f"{h5_path} is missing camera(s) {missing}; available cameras: {available}"
+            )
+
+        for camera_name in cameras:
+            camera_group = root[f"obs/image/{camera_name}"]
+            missing_datasets = [
+                name for name in REQUIRED_CAMERA_DATASETS if name not in camera_group
+            ]
+            if missing_datasets:
+                raise ValueError(
+                    f"{h5_path} camera {camera_name!r} is missing dataset(s) {missing_datasets}"
+                )
 
 
 def episode_length(root, cameras):
@@ -237,6 +277,15 @@ def parse_args():
             "task_ranges. Range endpoints are inclusive."
         ),
     )
+    parser.add_argument(
+        "--cameras",
+        type=parse_camera_list,
+        default=DEFAULT_CAMERAS,
+        help=(
+            "Comma-separated camera names to convert. Only these cameras are written, "
+            "for example left,right,front or left,right,back."
+        ),
+    )
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--robot-type", default="custom_bimanual")
     parser.add_argument(
@@ -264,6 +313,10 @@ def main():
     if not h5_files:
         raise FileNotFoundError(f"No H5 files found from {args.input} with {args.pattern}")
     task_ranges = load_task_ranges(args.task_ranges)
+    cameras = args.cameras
+
+    for h5_path in h5_files:
+        validate_cameras_for_file(h5_path, cameras)
 
     if args.output.exists():
         if not args.overwrite:
@@ -271,7 +324,7 @@ def main():
         shutil.rmtree(args.output)
 
     LeRobotDataset = import_lerobot_dataset()
-    features = build_features(h5_files[0], CAMERAS, use_videos=not args.no_videos)
+    features = build_features(h5_files[0], cameras, use_videos=not args.no_videos)
 
     dataset = LeRobotDataset.create(
         repo_id=args.repo_id,
@@ -291,7 +344,7 @@ def main():
             dataset,
             h5_path,
             task=task,
-            cameras=CAMERAS,
+            cameras=cameras,
             action_mode=args.action_mode,
             max_frames=args.max_frames,
         )
@@ -300,6 +353,7 @@ def main():
 
     dataset.finalize()
     print(f"converted {len(h5_files)} episodes, total_frames={total_frames}")
+    print(f"cameras: {','.join(cameras)}")
     print(f"output: {args.output}")
 
     if args.push_to_hub:
