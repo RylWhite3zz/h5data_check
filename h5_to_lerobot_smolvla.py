@@ -205,7 +205,7 @@ def task_for_h5(h5_path, task_ranges, default_task=None):
     )
 
 
-def convert_episode(dataset, h5_path, task, cameras, action_mode, max_frames=None):
+def convert_episode(dataset, h5_path, task, cameras, action_offset_frames, max_frames=None):
     with h5py.File(h5_path, "r") as root:
         offsets = image_offsets(root, cameras)
         length = episode_length(root, cameras)
@@ -215,10 +215,7 @@ def convert_episode(dataset, h5_path, task, cameras, action_mode, max_frames=Non
         qpos = load_qpos(root, length)
 
         for frame_index in range(length):
-            if action_mode == "next":
-                action_index = min(frame_index + 1, length - 1)
-            else:
-                action_index = frame_index
+            action_index = min(frame_index + action_offset_frames, length - 1)
 
             frame = {
                 "observation.state": qpos[frame_index],
@@ -292,7 +289,16 @@ def parse_args():
         "--action-mode",
         choices=("current", "next"),
         default="next",
-        help="Use qpos[t] or qpos[t+1] as the action target.",
+        help="Compatibility option. Used only when --action-offset-frames is not set.",
+    )
+    parser.add_argument(
+        "--action-offset-frames",
+        type=int,
+        default=None,
+        help=(
+            "Use qpos[t+N] as the action target while observation.state stays qpos[t]. "
+            "At 30 fps, N=1/2/3 is roughly 33/67/100 ms of action lead."
+        ),
     )
     parser.add_argument(
         "--no-videos",
@@ -309,6 +315,13 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.action_offset_frames is None:
+        action_offset_frames = 1 if args.action_mode == "next" else 0
+    else:
+        action_offset_frames = args.action_offset_frames
+    if action_offset_frames < 0:
+        raise ValueError("--action-offset-frames must be >= 0")
+
     h5_files = iter_h5_files(args.input, args.pattern)
     if not h5_files:
         raise FileNotFoundError(f"No H5 files found from {args.input} with {args.pattern}")
@@ -345,7 +358,7 @@ def main():
             h5_path,
             task=task,
             cameras=cameras,
-            action_mode=args.action_mode,
+            action_offset_frames=action_offset_frames,
             max_frames=args.max_frames,
         )
         total_frames += length
@@ -354,6 +367,7 @@ def main():
     dataset.finalize()
     print(f"converted {len(h5_files)} episodes, total_frames={total_frames}")
     print(f"cameras: {','.join(cameras)}")
+    print(f"action_offset_frames: {action_offset_frames}")
     print(f"output: {args.output}")
 
     if args.push_to_hub:

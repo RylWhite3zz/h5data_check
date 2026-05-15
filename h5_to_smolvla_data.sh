@@ -2,6 +2,7 @@
 set -euo pipefail
 
 CENTER_CAMERA="${CENTER_CAMERA:-front}"
+ACTION_OFFSET_FRAMES="${ACTION_OFFSET_FRAMES:-2}"
 
 python h5_to_lerobot_smolvla.py \
   --input /mnt/som/passover-0509 \
@@ -10,6 +11,6 @@ python h5_to_lerobot_smolvla.py \
   --repo-id Dinzhen123/my_smolvla_dataset \
   --task-ranges ./task_ranges_smolvla.json \
   --cameras "${CENTER_CAMERA},left,right" \
-  --action-mode next \
+  --action-offset-frames "${ACTION_OFFSET_FRAMES}" \
   --fps 30 \
   --overwrite
