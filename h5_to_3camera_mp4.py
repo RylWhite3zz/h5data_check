@@ -18,6 +18,11 @@ def parse_args():
         default="episode_three_cameras.mp4",
         help="Path to the output MP4 file.",
     )
+    parser.add_argument(
+        "--cameras",
+        default="front,left,right",
+        help="Comma-separated camera names, for example front,left,right or back,left,right.",
+    )
     return parser.parse_args()
 
 
@@ -54,7 +59,9 @@ def main():
     import cv2
 
     with h5py.File(args.h5_path, "r") as f:
-        cameras = ["left", "right", "front"]
+        cameras = [name.strip() for name in args.cameras.split(",") if name.strip()]
+        if not cameras:
+            raise ValueError("--cameras must contain at least one camera name")
 
         num_frames = min(
             int(f[f"obs/image/{cam}/cnt"][0])

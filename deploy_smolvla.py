@@ -38,11 +38,13 @@ DATASET_IMAGE_KEYS = {
     "left": "observation.images.left",
     "right": "observation.images.right",
     "front": "observation.images.front",
+    "back": "observation.images.back",
 }
 POLICY_IMAGE_KEYS = {
-    "left": "observation.images.camera1",
-    "right": "observation.images.camera2",
-    "front": "observation.images.camera3",
+    "front": "observation.images.camera1",
+    "back": "observation.images.camera1",
+    "left": "observation.images.camera2",
+    "right": "observation.images.camera3",
 }
 DEFAULT_STEP_LIMIT_7D = [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.2]
 
@@ -59,13 +61,25 @@ def camera_names_from_args(args: argparse.Namespace) -> list[str]:
     if args.cameras:
         cameras = [name.strip() for name in args.cameras.split(",") if name.strip()]
     elif args.camera_mode == "2cam":
-        cameras = ["left", "right"]
+        cameras = ["front", "left"]
     else:
-        cameras = ["left", "right", "front"]
+        cameras = ["front", "left", "right"]
 
     unknown = sorted(set(cameras) - set(DATASET_IMAGE_KEYS))
     if unknown:
         raise ValueError(f"Unsupported camera name(s): {unknown}")
+
+    duplicates = sorted({name for name in cameras if cameras.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"Duplicate camera name(s): {duplicates}")
+
+    policy_slots = [POLICY_IMAGE_KEYS[camera] for camera in cameras]
+    duplicate_slots = sorted({slot for slot in policy_slots if policy_slots.count(slot) > 1})
+    if duplicate_slots:
+        raise ValueError(
+            f"Selected cameras map to duplicate policy image slot(s): {duplicate_slots}. "
+            "Choose only one of front/back for camera1."
+        )
     return cameras
 
 
@@ -96,7 +110,7 @@ def parse_assignment_map(value: str | None) -> dict[str, str]:
         if not key or not mapped_value:
             raise ValueError(f"Expected non-empty KEY=VALUE item in mapping, got {item!r}")
         if key not in DATASET_IMAGE_KEYS:
-            raise ValueError(f"Unsupported model camera slot {key!r}. Use one of {sorted(DATASET_IMAGE_KEYS)}")
+            raise ValueError(f"Unsupported camera name {key!r}. Use one of {sorted(DATASET_IMAGE_KEYS)}")
         result[key] = mapped_value
     return result
 
@@ -106,6 +120,7 @@ def build_camera_topic_map(args: argparse.Namespace, camera_names: list[str]) ->
         "left": args.img_left_topic,
         "right": args.img_right_topic,
         "front": args.img_front_topic,
+        "back": args.img_back_topic,
     }
 
     node_map = parse_assignment_map(args.camera_node_map)
@@ -116,7 +131,7 @@ def build_camera_topic_map(args: argparse.Namespace, camera_names: list[str]) ->
 
     missing = [camera for camera in camera_names if not topic_by_camera.get(camera)]
     if missing:
-        raise ValueError(f"Missing ROS image topic for model camera slot(s): {missing}")
+        raise ValueError(f"Missing ROS image topic for camera(s): {missing}")
     return {camera: topic_by_camera[camera] for camera in camera_names}
 
 
@@ -484,11 +499,12 @@ class RosOperator:
         self.right_joint_deque: deque[Any] = deque(maxlen=args.buffer_size)
         self.left_pub = None
         self.right_pub = None
-        self.last_command: np.ndarray | None = None
+        self.last_command = expand_joint_limits(args.initial_command)
 
         self.max_joint_step = None if args.disable_step_limit else expand_joint_limits(args.max_joint_step)
         self.joint_min = expand_joint_limits(args.joint_min)
         self.joint_max = expand_joint_limits(args.joint_max)
+        self.action_delta_signs = expand_joint_limits(args.action_delta_signs)
 
         rospy.init_node(args.ros_node_name, anonymous=True)
         self._init_subscribers()
@@ -525,7 +541,12 @@ class RosOperator:
     def _init_subscribers(self) -> None:
         for camera in self.camera_names:
             topic = self.topic_by_camera[camera]
-            self.rospy.loginfo("Subscribing model camera slot '%s' from ROS topic '%s'", camera, topic)
+            self.rospy.loginfo(
+                "Subscribing camera '%s' as '%s' from ROS topic '%s'",
+                camera,
+                POLICY_IMAGE_KEYS[camera],
+                topic,
+            )
             self.rospy.Subscriber(
                 topic,
                 self.Image,
@@ -621,10 +642,31 @@ class RosOperator:
         with self.lock:
             return self._latest_state_locked()
 
-    def prepare_action(self, action: np.ndarray) -> np.ndarray:
+    def action_reference(self) -> np.ndarray | None:
+        reference = self.last_command if self.last_command is not None else self.current_state()
+        if reference is not None and reference.shape == (14,):
+            return reference
+        return None
+
+    def transform_action(self, action: np.ndarray, reference: np.ndarray | None) -> np.ndarray:
         target = np.asarray(action, dtype=np.float32).reshape(14)
+        if self.args.swap_action_arms:
+            target = np.concatenate([target[7:], target[:7]], axis=0)
+        if self.action_delta_signs is not None:
+            if reference is None:
+                self.rospy.logwarn_throttle(
+                    1.0,
+                    "--action-delta-signs is set but no 14-D reference state is available; skipping sign transform.",
+                )
+            else:
+                target = reference + self.action_delta_signs * (target - reference)
+        return target
+
+    def prepare_action(self, action: np.ndarray) -> np.ndarray:
+        raw_target = np.asarray(action, dtype=np.float32).reshape(14)
+        reference = self.action_reference()
+        target = self.transform_action(raw_target, reference)
         if self.max_joint_step is not None:
-            reference = self.last_command if self.last_command is not None else self.current_state()
             if reference is not None and reference.shape == (14,):
                 delta = np.clip(target - reference, -self.max_joint_step, self.max_joint_step)
                 target = reference + delta
@@ -632,6 +674,17 @@ class RosOperator:
             target = np.maximum(target, self.joint_min)
         if self.joint_max is not None:
             target = np.minimum(target, self.joint_max)
+        if self.args.log_action_details:
+            if reference is None:
+                self.rospy.loginfo_throttle(
+                    1.0,
+                    f"action raw={raw_target} target={target}",
+                )
+            else:
+                self.rospy.loginfo_throttle(
+                    1.0,
+                    f"action ref={reference} raw_delta={raw_target - reference} target_delta={target - reference}",
+                )
         return target
 
     def publish_action(self, action: np.ndarray) -> None:
@@ -835,6 +888,8 @@ def run_robot(args: argparse.Namespace) -> None:
     args.max_joint_step = parse_float_list(args.max_joint_step, valid_lengths=(1, 7, 14))
     args.joint_min = parse_float_list(args.joint_min, valid_lengths=(1, 7, 14))
     args.joint_max = parse_float_list(args.joint_max, valid_lengths=(1, 7, 14))
+    args.action_delta_signs = parse_float_list(args.action_delta_signs, valid_lengths=(1, 7, 14))
+    args.initial_command = parse_float_list(args.initial_command, valid_lengths=(7, 14))
     if args.temporal_agg and args.server_action_mode == "single":
         raise ValueError("--temporal-agg requires --server-action-mode chunk")
     if args.temporal_agg and args.temporal_agg_query_interval <= 0:
@@ -927,7 +982,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SmolVLA remote inference deployment for the bimanual ROS arm.")
     parser.add_argument("--role", choices=("server", "robot"), required=True)
     parser.add_argument("--camera-mode", choices=("2cam", "3cam"), default="3cam")
-    parser.add_argument("--cameras", default=None, help="Optional comma list, e.g. left,right or left,right,front.")
+    parser.add_argument(
+        "--cameras",
+        default=None,
+        help="Optional comma list, e.g. front,left or front,left,right or back,left,right.",
+    )
     parser.add_argument("--task", default="your task instruction here")
     parser.add_argument("--robot-type", default="custom_bimanual")
     parser.add_argument("--verbose", action="store_true")
@@ -955,19 +1014,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--img-left-topic", default="/camera_l/color/image_raw")
     parser.add_argument("--img-right-topic", default="/camera_r/color/image_raw")
     parser.add_argument("--img-front-topic", default="/camera_f/color/image_raw")
+    parser.add_argument("--img-back-topic", default="/camera_b/color/image_raw")
     parser.add_argument(
         "--camera-topic-map",
         default=None,
         help=(
             "Map model camera slots to concrete ROS image topics, e.g. "
-            "'left=/camera_l/color/image_raw,right=/camera_r/color/image_raw,front=/camera_e/color/image_raw'."
+            "'front=/camera_f/color/image_raw,left=/camera_l/color/image_raw,right=/camera_r/color/image_raw' "
+            "or 'back=/camera_b/color/image_raw,left=/camera_l/color/image_raw,right=/camera_r/color/image_raw'."
         ),
     )
     parser.add_argument(
         "--camera-node-map",
         default=None,
         help=(
-            "Map model camera slots to camera node/prefix names, e.g. 'left=camera_l,right=camera_r,front=camera_e'. "
+            "Map camera names to camera node/prefix names, e.g. 'front=camera_f,left=camera_l,right=camera_r'. "
             "The topic is built with --camera-topic-template."
         ),
     )
@@ -1028,6 +1089,32 @@ def build_parser() -> argparse.ArgumentParser:
     hold_group.add_argument("--hold-position", dest="hold_position", action="store_true", default=True)
     hold_group.add_argument("--no-hold-position", dest="hold_position", action="store_false")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--swap-action-arms",
+        action="store_true",
+        help="Swap model action halves before publishing: right half to left arm, left half to right arm.",
+    )
+    parser.add_argument(
+        "--action-delta-signs",
+        default=None,
+        help=(
+            "Optional 1, 7, or 14 signs applied to (action-reference) before step limiting. "
+            "Use -1 to reverse all motion directions, or e.g. '-1,-1,-1,-1,-1,-1,1' to keep grippers unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--log-action-details",
+        action="store_true",
+        help="Throttle-log action reference, raw delta, and final target delta for debugging coordinate mismatches.",
+    )
+    parser.add_argument(
+        "--initial-command",
+        default=None,
+        help=(
+            "Optional 7 or 14 comma-separated command-space reference used before the first publish. "
+            "Leave unset to use current joint feedback as the first step-limit reference."
+        ),
+    )
     parser.add_argument("--disable-step-limit", action="store_true")
     parser.add_argument(
         "--max-joint-step",

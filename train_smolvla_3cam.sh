@@ -1,3 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CENTER_CAMERA="${CENTER_CAMERA:-front}"
+
 CUDA_VISIBLE_DEVICES=4,5 accelerate launch \
   --multi_gpu \
   --num_processes=2 \
@@ -16,4 +21,4 @@ CUDA_VISIBLE_DEVICES=4,5 accelerate launch \
   --save_freq=1000 \
   --wandb.enable=false \
   --policy.push_to_hub=false \
-   --rename_map='{"observation.images.left": "observation.images.camera1", "observation.images.right": "observation.images.camera2","observation.images.front": "observation.images.camera3"}'
+  --rename_map="{\"observation.images.${CENTER_CAMERA}\": \"observation.images.camera1\", \"observation.images.left\": \"observation.images.camera2\", \"observation.images.right\": \"observation.images.camera3\"}"

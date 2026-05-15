@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 
 
-DEFAULT_CAMERAS = ("left", "right", "front")
+DEFAULT_CAMERAS = ("front", "left", "right")
 REQUIRED_CAMERA_DATASETS = ("cnt", "len", "raw")
 DEFAULT_TASK_RANGES = Path(__file__).with_name("task_ranges_smolvla.json")
 
@@ -283,7 +283,7 @@ def parse_args():
         default=DEFAULT_CAMERAS,
         help=(
             "Comma-separated camera names to convert. Only these cameras are written, "
-            "for example left,right,front or left,right,back."
+            "for example front,left,right or back,left,right."
         ),
     )
     parser.add_argument("--fps", type=int, default=30)
@@ -291,7 +291,7 @@ def parse_args():
     parser.add_argument(
         "--action-mode",
         choices=("current", "next"),
-        default="current",
+        default="next",
         help="Use qpos[t] or qpos[t+1] as the action target.",
     )
     parser.add_argument(

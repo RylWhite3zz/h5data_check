@@ -42,9 +42,10 @@ import deploy_smolvla as bridge
 
 OFFICIAL_MODEL_ID = "lerobot/smolvla_base"
 OFFICIAL_IMAGE_KEYS = {
-    "left": "observation.images.camera1",
-    "right": "observation.images.camera2",
-    "front": "observation.images.camera3",
+    "front": "observation.images.camera1",
+    "back": "observation.images.camera1",
+    "left": "observation.images.camera2",
+    "right": "observation.images.camera3",
 }
 DEFAULT_STATE_INDICES = "7,8,9,10,11,13"
 

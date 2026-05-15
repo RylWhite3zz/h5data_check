@@ -24,7 +24,7 @@ This is mainly for connectivity tests, latency tests, and checking what the base
 The adapter therefore:
 
 - reads the same ROS image/joint topics as `deploy_smolvla.py`;
-- maps `left/right/front` images to official `camera1/camera2/camera3`;
+- maps `front` or `back` to `camera1`, `left` to `camera2`, and `right` to `camera3`;
 - selects six values from the local 14-D state via `--state-indices`;
 - expands the 6-D model action back into a 14-D command shape via `--action-indices`;
 - dry-runs by default.
@@ -144,6 +144,27 @@ python deploy_smolvla.py \
   --publish-rate 30
 ```
 
+This default 3-camera mode uses:
+
+```text
+front -> observation.images.camera1
+left  -> observation.images.camera2
+right -> observation.images.camera3
+```
+
+For a back-camera checkpoint, select `back` instead of `front`:
+
+```bash
+cd /home/agilex/cobot_magic/collect_data
+python deploy_smolvla.py \
+  --role robot \
+  --server-host <GPU_DESKTOP_IP> \
+  --camera-mode 3cam \
+  --cameras back,left,right \
+  --task "your task instruction here" \
+  --publish-rate 30
+```
+
 2-camera deployment:
 
 ```bash
@@ -156,31 +177,34 @@ python deploy_smolvla.py \
   --publish-rate 30
 ```
 
+The default 2-camera mode uses `front,left`, so `camera3` is empty. Use `--cameras back,left` for a back-camera 2-camera checkpoint.
+
 Default ROS topics:
 
 ```text
+front image:       /camera_f/color/image_raw
+back image:        /camera_b/color/image_raw
 left image:        /camera_l/color/image_raw
 right image:       /camera_r/color/image_raw
-front image:       /camera_f/color/image_raw
 left state:        /puppet/joint_left
 right state:       /puppet/joint_right
 left command:      /master/joint_left
 right command:     /master/joint_right
 ```
 
-Override them with `--img-left-topic`, `--img-right-topic`, `--img-front-topic`, `--puppet-arm-left-topic`, `--puppet-arm-right-topic`, `--puppet-arm-left-cmd-topic`, and `--puppet-arm-right-cmd-topic`.
+Override them with `--img-front-topic`, `--img-back-topic`, `--img-left-topic`, `--img-right-topic`, `--puppet-arm-left-topic`, `--puppet-arm-right-topic`, `--puppet-arm-left-cmd-topic`, and `--puppet-arm-right-cmd-topic`.
 
-If the robot has more physical cameras than the model uses, keep `--camera-mode` as the model mode and map each model input slot to the desired physical camera topic:
+If the robot has more physical cameras than the model uses, keep `--camera-mode` as the model mode and map each semantic camera name to the desired physical camera topic:
 
 ```bash
 python deploy_smolvla.py \
   --role robot \
   --server-host <GPU_DESKTOP_IP> \
   --camera-mode 3cam \
-  --camera-topic-map 'left=/camera_l/color/image_raw,right=/camera_r/color/image_raw,front=/camera_e/color/image_raw'
+  --camera-topic-map 'front=/camera_e/color/image_raw,left=/camera_l/color/image_raw,right=/camera_r/color/image_raw'
 ```
 
-This example feeds the new `camera_e` stream into the model's `front` input slot. The model still receives `left/right/front`; only their ROS sources change.
+This example feeds the new `camera_e` stream into the semantic `front` view, which is sent to model input `observation.images.camera1`.
 
 If the camera topics follow the usual `/<node>/color/image_raw` convention, you can map by node/prefix instead:
 
@@ -189,10 +213,10 @@ python deploy_smolvla.py \
   --role robot \
   --server-host <GPU_DESKTOP_IP> \
   --camera-mode 3cam \
-  --camera-node-map 'left=camera_l,right=camera_r,front=camera_e'
+  --camera-node-map 'front=camera_e,left=camera_l,right=camera_r'
 ```
 
-For a 2-camera checkpoint, only map the slots that are actually used, normally `left` and `right`.
+For a 2-camera checkpoint, only map the cameras that are actually used, normally `front,left` or `back,left`.
 
 ## Safety switches
 
